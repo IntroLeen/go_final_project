@@ -12,14 +12,14 @@ type TasksResp struct {
 
 func tasksHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, map[string]string{"error": "method not allowed"})
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	const limit = 50
 	tasks, err := db.Tasks(limit)
 	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

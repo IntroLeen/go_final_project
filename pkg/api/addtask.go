@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -15,13 +16,13 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	var t db.Task
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	t.Title = strings.TrimSpace(t.Title)
 	if t.Title == "" {
-		writeJSON(w, map[string]string{"error": "empty title"})
+		writeErr(w, http.StatusBadRequest, "empty title")
 		return
 	}
 
@@ -34,7 +35,7 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	parsed, err := time.Parse(Layout, t.Date)
 	if err != nil {
-		writeJSON(w, map[string]string{"error": "bad date format"})
+		writeErr(w, http.StatusBadRequest, "bad date format")
 		return
 	}
 	parsed = toDateOnly(parsed)
@@ -44,7 +45,7 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if t.Repeat != "" {
 		next, err = NextDate(now, t.Date, t.Repeat)
 		if err != nil {
-			writeJSON(w, map[string]string{"error": err.Error()})
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -59,7 +60,7 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := db.AddTask(&t)
 	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -69,12 +70,12 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 func getTaskHandler(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.URL.Query().Get("id"))
 	if id == "" {
-		writeJSON(w, map[string]string{"error": "missing id"})
+		writeErr(w, http.StatusBadRequest, "missing id")
 		return
 	}
 	task, err := db.GetTask(id)
 	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
 	writeJSON(w, task)
@@ -85,19 +86,19 @@ func updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	var t db.Task
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	t.ID = strings.TrimSpace(t.ID)
 	if t.ID == "" {
-		writeJSON(w, map[string]string{"error": "missing id"})
+		writeErr(w, http.StatusBadRequest, "missing id")
 		return
 	}
 
 	t.Title = strings.TrimSpace(t.Title)
 	if t.Title == "" {
-		writeJSON(w, map[string]string{"error": "empty title"})
+		writeErr(w, http.StatusBadRequest, "empty title")
 		return
 	}
 
@@ -109,7 +110,7 @@ func updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	parsed, err := time.Parse(Layout, t.Date)
 	if err != nil {
-		writeJSON(w, map[string]string{"error": "bad date format"})
+		writeErr(w, http.StatusBadRequest, "bad date format")
 		return
 	}
 	parsed = toDateOnly(parsed)
@@ -119,7 +120,7 @@ func updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if t.Repeat != "" {
 		next, err = NextDate(now, t.Date, t.Repeat)
 		if err != nil {
-			writeJSON(w, map[string]string{"error": err.Error()})
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -133,7 +134,7 @@ func updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.UpdateTask(&t); err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -142,7 +143,10 @@ func updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	_ = json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("encode error: %v", err)
+	}
+
 }
 
 func int64ToString(v int64) string {
@@ -190,19 +194,26 @@ func taskHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		deleteTaskHandler(w, r)
 	default:
-		writeJSON(w, map[string]string{"error": "method not allowed"})
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
 func deleteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.URL.Query().Get("id"))
 	if id == "" {
-		writeJSON(w, map[string]string{"error": "missing id"})
+		writeErr(w, http.StatusBadRequest, "missing id")
 		return
 	}
 	if err := db.DeleteTask(id); err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
+		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
 	writeJSON(w, struct{}{})
+}
+func writeErr(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
+		log.Printf("writeErr encode error: %v", err)
+	}
 }
